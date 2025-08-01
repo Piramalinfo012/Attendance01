@@ -44,9 +44,7 @@ function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-slate-50 to-slate-100 p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-10">
-          <h1 className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 via-blue-600 to-indigo-600 transition-all duration-300 mb-2">
-            Leads To Retail EMS
-          </h1>
+          
           <p className="text-slate-600">Sign in to access your dashboard</p>
         </div>
 
