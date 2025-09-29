@@ -57,7 +57,7 @@ function Sidebar({ userType, username, tabs = [] }) {
       color: "text-indigo-500",
     },
     {
-      label: "Advance",
+      label: "OTR",
       icon: Send,
       href: "/advance",
       color: "text-indigo-500",

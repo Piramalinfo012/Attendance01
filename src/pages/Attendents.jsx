@@ -1,21 +1,416 @@
 "use client";
 
 import { useState, useEffect, useContext } from "react";
-import { MapPin, Loader2 } from "lucide-react";
-import AttendanceHistory from "../components/AttendanceHistory";
+import { MapPin, Loader2, Download } from "lucide-react";
 import { AuthContext } from "../App";
 
+// AttendanceHistory Component with filters in header and Excel download functionality
+const AttendanceHistory = ({ attendanceData, isLoading, userRole }) => {
+  const [filters, setFilters] = useState({
+    name: "",
+    status: "",
+    month: ""
+  });
+  const [filteredData, setFilteredData] = useState([]);
+
+  // Month names for dropdown
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+
+  const getUniqueNames = (data) => {
+    const names = data.map(entry => entry.salesPersonName).filter(Boolean);
+    return [...new Set(names)].sort();
+  };
+
+  const getAvailableMonths = (data) => {
+    const months = new Set();
+    data.forEach(entry => {
+      if (entry.dateTime) {
+        const dateStr = entry.dateTime.split(" ")[0];
+        if (dateStr) {
+          const [day, month, year] = dateStr.split("/");
+          const monthNum = parseInt(month, 10) - 1;
+          const monthName = monthNames[monthNum];
+          if (monthName) {
+            months.add(`${monthName} ${year}`);
+          }
+        }
+      }
+    });
+    return Array.from(months).sort((a, b) => {
+      const [aMonth, aYear] = a.split(" ");
+      const [bMonth, bYear] = b.split(" ");
+      const aDate = new Date(parseInt(aYear), monthNames.indexOf(aMonth));
+      const bDate = new Date(parseInt(bYear), monthNames.indexOf(bMonth));
+      return bDate - aDate;
+    });
+  };
+
+  const applyFilters = (data) => {
+    if (!filters.name && !filters.status && !filters.month) {
+      return data;
+    }
+
+    return data.filter((entry) => {
+      if (filters.name && !entry.salesPersonName?.toLowerCase().includes(filters.name.toLowerCase())) {
+        return false;
+      }
+
+      if (filters.status && entry.status !== filters.status) {
+        return false;
+      }
+
+      if (filters.month) {
+        const entryDate = entry.dateTime?.split(" ")[0];
+        if (entryDate) {
+          const [day, month, year] = entryDate.split("/");
+          const monthNum = parseInt(month, 10) - 1;
+          const monthName = monthNames[monthNum];
+          const entryMonthYear = `${monthName} ${year}`;
+          if (entryMonthYear !== filters.month) {
+            return false;
+          }
+        }
+      }
+
+      return true;
+    });
+  };
+
+  // Enhanced Excel download function
+  const downloadExcel = () => {
+    if (!filteredData || filteredData.length === 0) {
+      alert('No data available to download');
+      return;
+    }
+
+    // Create proper Excel content with XML format
+    const currentDate = new Date().toLocaleDateString();
+    const fileName = `Attendance_History_${new Date().toISOString().split('T')[0]}`;
+    
+    // Create Excel XML structure
+    let excelContent = `<?xml version="1.0"?>
+      <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+                xmlns:o="urn:schemas-microsoft-com:office:office"
+                xmlns:x="urn:schemas-microsoft-com:office:excel"
+                xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+                xmlns:html="http://www.w3.org/TR/REC-html40">
+        <Worksheet ss:Name="Attendance History">
+          <Table>
+            <Row>
+              <Cell><Data ss:Type="String">Name</Data></Cell>
+              <Cell><Data ss:Type="String">Date &amp; Time</Data></Cell>
+              <Cell><Data ss:Type="String">Status</Data></Cell>
+              <Cell><Data ss:Type="String">Map Link</Data></Cell>
+              <Cell><Data ss:Type="String">Address</Data></Cell>
+            </Row>`;
+
+    // Add data rows
+    filteredData.forEach(row => {
+      excelContent += `
+        <Row>
+          <Cell><Data ss:Type="String">${row.salesPersonName || 'N/A'}</Data></Cell>
+          <Cell><Data ss:Type="String">${row.dateTime || 'N/A'}</Data></Cell>
+          <Cell><Data ss:Type="String">${row.status || 'N/A'}</Data></Cell>
+          <Cell><Data ss:Type="String">${row.mapLink || 'N/A'}</Data></Cell>
+          <Cell><Data ss:Type="String">${(row.address || 'N/A').replace(/[<>&"']/g, function(match) {
+            switch(match) {
+              case '<': return '&lt;';
+              case '>': return '&gt;';
+              case '&': return '&amp;';
+              case '"': return '&quot;';
+              case "'": return '&apos;';
+              default: return match;
+            }
+          })}</Data></Cell>
+        </Row>`;
+    });
+
+    excelContent += `
+          </Table>
+        </Worksheet>
+      </Workbook>`;
+
+    // Create and download the file
+    const blob = new Blob([excelContent], { 
+      type: 'application/vnd.ms-excel;charset=utf-8;' 
+    });
+    
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${fileName}.xls`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    const filtered = applyFilters(attendanceData || []);
+    setFilteredData(filtered);
+  }, [filters, attendanceData]);
+
+  const handleFilterChange = (filterType, value) => {
+    setFilters(prev => ({
+      ...prev,
+      [filterType]: value
+    }));
+  };
+
+  const clearFilters = () => {
+    setFilters({
+      name: "",
+      status: "",
+      month: ""
+    });
+  };
+
+  const hasActiveFilters = filters.name || filters.status || filters.month;
+
+  if (isLoading) {
+    return (
+      <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden mt-8">
+        <div className="bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 px-8 py-6">
+          <h2 className="text-2xl font-bold text-white">Attendance History</h2>
+          <p className="text-blue-50">Loading your attendance records...</p>
+        </div>
+        <div className="p-8 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">Loading attendance history...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden mt-8">
+      {/* Header with Filters and Download */}
+      <div className="bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 px-8 py-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
+          <div>
+            <h2 className="text-2xl font-bold text-white">Attendance History</h2>
+            <p className="text-blue-50">Your records are displayed below.</p>
+          </div>
+          
+          {/* Excel Download Button Only */}
+          {userRole?.toLowerCase() === "admin" && filteredData.length > 0 && (
+            <div className="flex gap-2">
+              <button
+                onClick={downloadExcel}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg border border-green-500 transition-colors shadow-md"
+                title="Download as Excel"
+              >
+                <Download className="h-4 w-4" />
+                Download 
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Filters Row - Only show for admin */}
+        {userRole?.toLowerCase() === "admin" && (
+          <div className="grid gap-3 md:grid-cols-4 items-end">
+            {/* Name Filter */}
+            <div>
+              <label className="block text-sm font-medium text-blue-100 mb-1">
+                Filter by Name
+              </label>
+              <select
+                value={filters.name}
+                onChange={(e) => handleFilterChange('name', e.target.value)}
+                className="w-full px-3 py-2 bg-white/90 border border-white/30 rounded-lg text-slate-700 text-sm focus:ring-2 focus:ring-white/50 focus:border-white/50"
+              >
+                <option value="">All Names</option>
+                {getUniqueNames(attendanceData || []).map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Status Filter */}
+            <div>
+              <label className="block text-sm font-medium text-blue-100 mb-1">
+                Filter by Status
+              </label>
+              <select
+                value={filters.status}
+                onChange={(e) => handleFilterChange('status', e.target.value)}
+                className="w-full px-3 py-2 bg-white/90 border border-white/30 rounded-lg text-slate-700 text-sm focus:ring-2 focus:ring-white/50 focus:border-white/50"
+              >
+                <option value="">All Status</option>
+                <option value="IN">IN</option>
+                <option value="OUT">OUT</option>
+                <option value="Leave">Leave</option>
+              </select>
+            </div>
+
+            {/* Month Filter */}
+            <div>
+              <label className="block text-sm font-medium text-blue-100 mb-1">
+                Filter by Month
+              </label>
+              <select
+                value={filters.month}
+                onChange={(e) => handleFilterChange('month', e.target.value)}
+                className="w-full px-3 py-2 bg-white/90 border border-white/30 rounded-lg text-slate-700 text-sm focus:ring-2 focus:ring-white/50 focus:border-white/50"
+              >
+                <option value="">All Months</option>
+                {getAvailableMonths(attendanceData || []).map((monthYear) => (
+                  <option key={monthYear} value={monthYear}>
+                    {monthYear}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Clear Filters Button */}
+            <div>
+              {hasActiveFilters && (
+                <button
+                  onClick={clearFilters}
+                  className="w-full px-3 py-2 bg-white/20 hover:bg-white/30 text-white text-sm rounded-lg border border-white/30 transition-colors"
+                >
+                  Clear Filters
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Filter Results Info */}
+        {hasActiveFilters && (
+          <div className="mt-3 bg-white/10 border border-white/20 rounded-lg p-3">
+            <p className="text-sm text-blue-100">
+              Showing {filteredData.length} of {attendanceData?.length || 0} records
+              {filters.name && ` • Name: ${filters.name}`}
+              {filters.status && ` • Status: ${filters.status}`}
+              {filters.month && ` • Month: ${filters.month}`}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Table Content */}
+      <div className="overflow-x-auto">
+        {(!attendanceData || attendanceData.length === 0) ? (
+          <div className="p-8 text-center">
+            <div className="text-slate-400 text-lg mb-2">📊</div>
+            <h3 className="text-lg font-semibold text-slate-600 mb-2">
+              No Records Found
+            </h3>
+            <p className="text-slate-500">
+              {userRole?.toLowerCase() === "admin" 
+                ? "No attendance records available."
+                : "You haven't marked any attendance yet."}
+            </p>
+          </div>
+        ) : filteredData.length === 0 && hasActiveFilters ? (
+          <div className="p-8 text-center">
+            <div className="text-slate-400 text-lg mb-2">🔍</div>
+            <h3 className="text-lg font-semibold text-slate-600 mb-2">
+              No Matching Records
+            </h3>
+            <p className="text-slate-500">
+              No records match your current filter criteria.
+            </p>
+          </div>
+        ) : (
+          <div className="min-w-full">
+            <table className="w-full border-collapse">
+              <thead className="bg-slate-50/50 border-b border-slate-200/50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider border-r border-slate-200/50 w-32">
+                    Name
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider border-r border-slate-200/50 w-40">
+                    Date & Time
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider border-r border-slate-200/50 w-24">
+                    Status
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider border-r border-slate-200/50 w-32">
+                    Map Link
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                    Address
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200/50">
+                {filteredData.map((record, index) => (
+                  <tr key={index} className="hover:bg-slate-50/30 transition-colors border-b border-slate-200/30">
+                    <td className="px-4 py-3 border-r border-slate-200/50 w-32">
+                      <div className="text-sm font-medium text-slate-900 break-words">
+                        {record.salesPersonName || "N/A"}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 border-r border-slate-200/50 w-40">
+                      <div className="text-sm text-slate-900 break-words">
+                        {record.dateTime || "N/A"}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 border-r border-slate-200/50 w-24">
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                        record.status === "IN"
+                          ? "bg-green-100 text-green-800"
+                          : record.status === "OUT"
+                          ? "bg-red-100 text-red-800"
+                          : record.status === "Leave"
+                          ? "bg-yellow-100 text-yellow-800"
+                          : "bg-gray-100 text-gray-800"
+                      }`}>
+                        {record.status || "N/A"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 border-r border-slate-200/50 w-32">
+                      {record.mapLink ? (
+                        <a
+                          href={record.mapLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-800 flex items-center gap-1 text-sm break-all"
+                        >
+                          <MapPin className="h-4 w-4 flex-shrink-0" />
+                          <span className="truncate">View Map</span>
+                        </a>
+                      ) : (
+                        <span className="text-slate-400 text-sm">N/A</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="text-sm text-slate-600 break-words max-w-md" title={record.address}>
+                        {record.address || "N/A"}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Main Attendance Component (unchanged from previous version)
 const Attendance = () => {
   const [attendance, setAttendance] = useState([]);
   const [historyAttendance, setHistoryAttendance] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
-   const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
+  const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
   const [errors, setErrors] = useState({});
   const [locationData, setLocationData] = useState(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
-  const [hasActiveSession, setHasActiveSession] = useState(false); // Track active session
-  const [hasOutActiveSession, setHasOutActiveSession] = useState([]); // Track active session
+  const [hasActiveSession, setHasActiveSession] = useState(false);
+  const [hasOutActiveSession, setHasOutActiveSession] = useState([]);
   const [inData, setInData] = useState({});
   const [outData, setOutData] = useState({});
 
@@ -158,71 +553,46 @@ const Attendance = () => {
     });
   };
 
-  // Check if user has active session
-const checkActiveSession = (attendanceData) => {
-  if (!attendanceData || attendanceData.length === 0) {
-    setHasActiveSession(false);
-    setHasCheckedInToday(false); // Reset this flag too
-    return;
-  }
+  const checkActiveSession = (attendanceData) => {
+    if (!attendanceData || attendanceData.length === 0) {
+      setHasActiveSession(false);
+      setHasCheckedInToday(false);
+      return;
+    }
 
-  // Filter records for current user
-  const userRecords = attendanceData.filter(
-    (record) =>
-      record.salesPersonName === salesPersonName &&
-      record.dateTime?.split(" ")[0].toString() ===
-        formatDateDDMMYYYY(new Date())
-  );
+    const userRecords = attendanceData.filter(
+      (record) =>
+        record.salesPersonName === salesPersonName &&
+        record.dateTime?.split(" ")[0].toString() ===
+          formatDateDDMMYYYY(new Date())
+    );
 
-  if (userRecords.length === 0) {
-    setHasActiveSession(false);
-    setHasCheckedInToday(false);
-    return;
-  }
+    if (userRecords.length === 0) {
+      setHasActiveSession(false);
+      setHasCheckedInToday(false);
+      return;
+    }
 
-  // Check the most recent record (first one since it's sorted by most recent)
-  const mostRecentRecord = userRecords[0];
+    const mostRecentRecord = userRecords[0];
+    const hasActive = mostRecentRecord.status === "IN";
+    setHasActiveSession(hasActive);
+    if (hasActive) {
+      setInData(mostRecentRecord);
+    }
 
-  // If the most recent record is "IN", user has active session
-  const hasActive = mostRecentRecord.status === "IN";
-  setHasActiveSession(hasActive);
-  if (hasActive) {
-    setInData(mostRecentRecord);
-  }
+    const hasOutActive = mostRecentRecord.status === "OUT";
+    if (hasOutActive) {
+      setOutData(mostRecentRecord);
+    }
 
-  const hasOutActive = mostRecentRecord.status === "OUT";
-  if (hasOutActive) {
-    setOutData(mostRecentRecord);
-  }
-
-  // Check if user has checked in today (regardless of current status)
-  const hasCheckedIn = userRecords.some(record => record.status === "IN");
-  setHasCheckedInToday(hasCheckedIn);
-  
-  // console.log("Active session check:", {
-  //   mostRecentRecord: mostRecentRecord,
-  //   hasActiveSession: hasActive
-  // });
-};
-    // console.log("Active session check:", {
-    //   mostRecentRecord: mostRecentRecord,
-    //   hasActiveSession: hasActive
-    // });
-  
+    const hasCheckedIn = userRecords.some(record => record.status === "IN");
+    setHasCheckedInToday(hasCheckedIn);
+  };
 
   const validateForm = () => {
     const newErrors = {};
 
     if (!formData.status) newErrors.status = "Status is required";
-
-    // Block IN if user has active session
-    // if (formData.status === "IN" && hasActiveSession) {
-    //   newErrors.status = "You are already checked in. Please check out first.";
-    // }
-
-    // if (formData.status === "OUT" && hasOutActiveSession) {
-    //   newErrors.status = "You are already checked Out. Please check in first.";
-    // }
 
     if (formData.status === "Leave") {
       if (!formData.startDate) newErrors.startDate = "Start date is required";
@@ -269,7 +639,6 @@ const checkActiveSession = (attendanceData) => {
       }
 
       const rows = data.table.rows;
-      // console.log("rows",rows);
       const formattedHistory = rows
         .map((row) => {
           const salesPerson = row.c?.[9]?.v;
@@ -318,13 +687,6 @@ const checkActiveSession = (attendanceData) => {
           };
         })
         .filter(Boolean);
-      // console.log("userRole",userRole);
-      // const filteredHistory =
-      //   userRole === "admin"
-      //     ? formattedHistory
-      //     : formattedHistory.filter(
-      //         (entry) => entry.salesPersonName === salesPersonName && entry.dateTime.split(' ')[0].toString() === formatDateDDMMYYYY(new Date())
-      //       );
 
       const filteredHistory = formattedHistory.filter(
         (entry) =>
@@ -339,8 +701,6 @@ const checkActiveSession = (attendanceData) => {
           : formattedHistory.filter(
               (entry) => entry.salesPersonName === salesPersonName
             );
-
-      // console.log("before Sort filteredHistory", filteredHistory)
 
       filteredHistory.sort((a, b) => {
         const parseGvizDate = (dateString) => {
@@ -392,12 +752,9 @@ const checkActiveSession = (attendanceData) => {
         return dateB.getTime() - dateA.getTime();
       });
 
-      // console.log("after Sort filteredHistory", filteredHistory)
-
       setAttendance(filteredHistory);
       setHistoryAttendance(filteredHistoryData);
 
-      // Check for active session after loading data
       checkActiveSession(filteredHistory);
     } catch (error) {
       console.error("Error fetching attendance history:", error);
@@ -411,11 +768,8 @@ const checkActiveSession = (attendanceData) => {
     fetchAttendanceHistory();
   }, [currentUser, isAuthenticated]);
 
-  // console.log("attendance", attendance)
-
   const handleSubmit = async (e) => {
     e.preventDefault();
-    // console.log("Submit button clicked!");
 
     if (!validateForm()) {
       showToast("Please fill in all required fields correctly.", "error");
@@ -435,11 +789,7 @@ const checkActiveSession = (attendanceData) => {
       }
     }
 
-    // console.log("ram ram out",outData);
     if (formData?.status === "OUT") {
-      // console.log("inData",inData)
-      // console.log("outData",outData)
-
       const indata = attendance.filter((item) => item.status === "IN");
       const outdata = attendance.filter((item) => item.status === "OUT");
       if (indata.length === 0) {
@@ -447,10 +797,6 @@ const checkActiveSession = (attendanceData) => {
         return;
       }
 
-      // if((outData.dateTime?.split(' ')[0].toString() === formatDateDDMMYYYY(new Date()).toString())){
-      //   showToast("Today Already out", "error");
-      // return;
-      // }
       if (outdata.length > 0) {
         showToast("Today Already out", "error");
         return;
@@ -461,11 +807,9 @@ const checkActiveSession = (attendanceData) => {
     setIsGettingLocation(true);
 
     try {
-      // First get location - we need this for all submission types
       let currentLocation = null;
       try {
         currentLocation = await getCurrentLocation();
-        // console.log("Location captured:", currentLocation);
       } catch (locationError) {
         console.error("Location error:", locationError);
         showToast(locationError.message, "error");
@@ -476,7 +820,6 @@ const checkActiveSession = (attendanceData) => {
 
       setIsGettingLocation(false);
 
-      // Simplified date handling - use current date for IN/OUT
       const currentDate = new Date();
       const timestamp = formatDateTime(currentDate);
 
@@ -491,7 +834,6 @@ const checkActiveSession = (attendanceData) => {
         ? formatDateTime(new Date(formData.endDate + "T00:00:00"))
         : "";
 
-      // Prepare row data
       let rowData = Array(10).fill("");
       rowData[0] = timestamp;
       rowData[1] = dateForAttendance;
@@ -503,8 +845,6 @@ const checkActiveSession = (attendanceData) => {
       rowData[7] = currentLocation.mapLink;
       rowData[8] = currentLocation.formattedAddress;
       rowData[9] = salesPersonName;
-
-      // console.log("Row data to be submitted:", rowData);
 
       const payload = {
         sheetName: "Attendance",
@@ -525,7 +865,6 @@ const checkActiveSession = (attendanceData) => {
 
         console.log("response", response);
 
-        // Always show success message first
         const successMessage =
           formData.status === "IN"
             ? "Check-in successful!"
@@ -534,7 +873,6 @@ const checkActiveSession = (attendanceData) => {
             : "Leave application submitted successfully!";
         showToast(successMessage, "success");
 
-        // Reset form immediately
         setFormData({
           status: "",
           startDate: formatDateInput(new Date()),
@@ -542,16 +880,13 @@ const checkActiveSession = (attendanceData) => {
           reason: "",
         });
 
-        // Then try to handle response and refresh data
         if (response.ok) {
           try {
             const responseText = await response.text();
-            // console.log("Response received:", responseText);
 
             if (responseText.trim()) {
               const result = JSON.parse(responseText);
               if (result.success === false && result.activeSession) {
-                // If there was actually an active session error, refresh to update UI
                 await fetchAttendanceHistory();
                 return;
               }
@@ -563,14 +898,10 @@ const checkActiveSession = (attendanceData) => {
           }
         }
 
-        // Refresh history to update the display
         await fetchAttendanceHistory();
       } catch (fetchError) {
-        // Even for fetch errors, we assume it was submitted successfully
-        // because Google Apps Script sometimes has CORS issues but still processes the data
         console.error("Fetch error:", fetchError);
 
-        // Show success message if we haven't already
         const successMessage =
           formData.status === "IN"
             ? "Check-in successful!"
@@ -579,7 +910,6 @@ const checkActiveSession = (attendanceData) => {
             : "Leave application submitted successfully!";
         showToast(successMessage, "success");
 
-        // Reset form
         setFormData({
           status: "",
           startDate: formatDateInput(new Date()),
@@ -587,7 +917,6 @@ const checkActiveSession = (attendanceData) => {
           reason: "",
         });
 
-        // Wait and refresh history
         setTimeout(async () => {
           await fetchAttendanceHistory();
         }, 2000);
@@ -601,24 +930,21 @@ const checkActiveSession = (attendanceData) => {
     }
   };
 
-   const handleInputChange = (e) => {
+  const handleInputChange = (e) => {
     const { name, value } = e.target;
     
-    // NEW: When status changes to "Leave", set default start date based on check-in status
     if (name === "status" && value === "Leave") {
       if (hasCheckedInToday) {
-        // If user has checked in today, leave start date empty
         setFormData((prev) => ({
           ...prev,
           [name]: value,
-          startDate: "" // Empty for manual selection
+          startDate: ""
         }));
       } else {
-        // If user hasn't checked in today, set default to today
         setFormData((prev) => ({
           ...prev,
           [name]: value,
-          startDate: formatDateInput(new Date()) // Set today's date as default
+          startDate: formatDateInput(new Date())
         }));
       }
     } else {
@@ -635,8 +961,6 @@ const checkActiveSession = (attendanceData) => {
       }));
     }
   };
-
-  // console.log("FormDAta",formData);
 
   const showLeaveFields = formData.status === "Leave";
 
@@ -666,7 +990,6 @@ const checkActiveSession = (attendanceData) => {
             <p className="text-emerald-50 text-lg">
               Record your daily attendance or apply for leave
             </p>
-            {/* No warning banner - removed for cleaner UI */}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-8 p-8">
@@ -684,20 +1007,8 @@ const checkActiveSession = (attendanceData) => {
                   }`}
                 >
                   <option value="">Select status</option>
-                  <option
-                    value="IN"
-                    // disabled={hasActiveSession}
-                    // className={hasActiveSession ? 'text-gray-400' : ''}
-                  >
-                    IN
-                  </option>
-                  <option
-                    value="OUT"
-                    // disabled = {hasOutActiveSession}
-                    // className={hasOutActiveSession ? 'text-gray-400' : ''}
-                  >
-                    OUT
-                  </option>
+                  <option value="IN">IN</option>
+                  <option value="OUT">OUT</option>
                   <option value="Leave">Leave</option>
                 </select>
                 {errors.status && (
@@ -705,7 +1016,6 @@ const checkActiveSession = (attendanceData) => {
                     {errors.status}
                   </p>
                 )}
-                {/* No helper text - removed for cleaner UI */}
               </div>
             </div>
 
@@ -722,7 +1032,6 @@ const checkActiveSession = (attendanceData) => {
                     📍 Location will be automatically captured when you submit
                   </div>
                 )}
-                {/* No session status display - removed for cleaner UI */}
               </div>
             )}
 
@@ -808,7 +1117,6 @@ const checkActiveSession = (attendanceData) => {
                 isSubmitting ||
                 isGettingLocation ||
                 !currentUser?.salesPersonName
-                // (formData.status === "IN" && hasActiveSession) // Disable IN when active session exists
               }
             >
               {isGettingLocation ? (
@@ -831,6 +1139,7 @@ const checkActiveSession = (attendanceData) => {
           </form>
         </div>
       </div>
+
       <AttendanceHistory
         attendanceData={historyAttendance}
         isLoading={isLoadingHistory}

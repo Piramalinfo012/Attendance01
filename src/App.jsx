@@ -87,7 +87,7 @@ const App = () => {
             "License",
             "Local Travel",       
             "Local Travel History",
-            "Advance",
+            "OTR",
           ];
         } else if (accessValue && typeof accessValue === 'string') {
           userTabs = accessValue.split(",").map((t) => t.trim()).filter(Boolean);

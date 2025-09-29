@@ -1016,7 +1016,7 @@ const AdvanceHistory = ({ salesPersonName, onBack, isLoading, history, onRefresh
                         )}
                         <div>
                             <h3 className="text-2xl font-bold text-white mb-2">
-                                {isAdmin ? "Advance Approval Panel" : "Advance Request History"}
+                                {isAdmin ? "Outstation Travel Request" : "Outstation Travel Request History"}
                             </h3>
                             <p className="text-indigo-50 text-lg">
                                 {isAdmin ? "Review and approve advance requests" : "View your submitted advance requests"}
