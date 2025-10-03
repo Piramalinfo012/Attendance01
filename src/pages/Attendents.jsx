@@ -1,8 +1,371 @@
 "use client";
 
 import { useState, useEffect, useContext } from "react";
-import { MapPin, Loader2, Download } from "lucide-react";
+import { MapPin, Loader2, Download, Calendar, CheckCircle, XCircle, Clock, AlertTriangle } from "lucide-react";
 import { AuthContext } from "../App";
+
+// Attendance Summary Card Component with Enhanced Mispunch Logic
+const AttendanceSummaryCard = ({ attendanceData, isLoading, userRole, salesPersonName }) => {
+  const [summaryData, setSummaryData] = useState({
+    totalPresent: 0,
+    totalLeave: 0,
+    totalIn: 0,
+    totalOut: 0,
+    totalMispunch: 0,
+    mispunchDetails: []
+  });
+
+  // Helper function to check if a day is complete (next day has started or past cutoff)
+  const isDayComplete = (dateStr) => {
+    if (!dateStr) return false;
+    
+    const [day, month, year] = dateStr.split("/");
+    const targetDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    const currentDate = new Date();
+    
+    // Set cutoff time to 11:59 PM of the target date
+    const cutoffTime = new Date(targetDate);
+    cutoffTime.setHours(23, 59, 59, 999);
+    
+    // Day is complete if current time is past the cutoff time
+    return currentDate > cutoffTime;
+  };
+
+  // Helper function to determine mispunch status
+  const determineMispunchStatus = (inCount, outCount, dateStr, hasLeave) => {
+    // If it's a leave day, no mispunch consideration
+    if (hasLeave) {
+      return { isMispunch: false, type: 'leave' };
+    }
+    
+    // If no punches at all, not a mispunch
+    if (inCount === 0 && outCount === 0) {
+      return { isMispunch: false, type: 'absent' };
+    }
+    
+    const isDayOver = isDayComplete(dateStr);
+    
+    // Perfect match - no mispunch
+    if (inCount === outCount) {
+      return { isMispunch: false, type: 'complete' };
+    }
+    
+    // More INs than OUTs
+    if (inCount > outCount) {
+      if (isDayOver) {
+        return { 
+          isMispunch: true, 
+          type: 'missing_out',
+          details: `${inCount} IN vs ${outCount} OUT - Missing ${inCount - outCount} OUT punch(es)`
+        };
+      } else {
+        return { 
+          isMispunch: false, 
+          type: 'in_progress',
+          details: `${inCount} IN vs ${outCount} OUT - Day in progress`
+        };
+      }
+    }
+    
+    // More OUTs than INs (invalid case)
+    if (outCount > inCount) {
+      return { 
+        isMispunch: true, 
+        type: 'invalid',
+        details: `${inCount} IN vs ${outCount} OUT - Invalid: More OUT than IN punches`
+      };
+    }
+    
+    return { isMispunch: false, type: 'unknown' };
+  };
+
+  useEffect(() => {
+    if (!attendanceData || attendanceData.length === 0) {
+      setSummaryData({
+        totalPresent: 0,
+        totalLeave: 0,
+        totalIn: 0,
+        totalOut: 0,
+        totalMispunch: 0,
+        mispunchDetails: []
+      });
+      return;
+    }
+
+    // Filter data for current user (admin sees all, users see only their data)
+    const userSpecificData = userRole?.toLowerCase() === "admin" 
+      ? attendanceData 
+      : attendanceData.filter(entry => entry.salesPersonName === salesPersonName);
+
+    // Calculate statistics
+    const currentMonth = new Date().getMonth();
+    const currentYear = new Date().getFullYear();
+    
+    // Group by employee and date to calculate daily statistics
+    const employeeDailyRecords = {};
+    
+    userSpecificData.forEach(entry => {
+      if (!entry.dateTime) return;
+      
+      const dateStr = entry.dateTime.split(" ")[0];
+      if (!dateStr) return;
+      
+      const [day, month, year] = dateStr.split("/");
+      const entryDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      
+      // Only count current month records
+      if (entryDate.getMonth() === currentMonth && entryDate.getFullYear() === currentYear) {
+        const employeeName = entry.salesPersonName || 'Unknown';
+        const dateKey = `${employeeName}_${dateStr}`;
+        
+        if (!employeeDailyRecords[dateKey]) {
+          employeeDailyRecords[dateKey] = {
+            employee: employeeName,
+            date: dateStr,
+            inCount: 0,
+            outCount: 0,
+            leaveCount: 0,
+            hasLeave: false,
+            punches: []
+          };
+        }
+        
+        if (entry.status === "IN") {
+          employeeDailyRecords[dateKey].inCount++;
+          employeeDailyRecords[dateKey].punches.push({
+            type: 'IN',
+            time: entry.dateTime,
+            status: entry.status
+          });
+        } else if (entry.status === "OUT") {
+          employeeDailyRecords[dateKey].outCount++;
+          employeeDailyRecords[dateKey].punches.push({
+            type: 'OUT',
+            time: entry.dateTime,
+            status: entry.status
+          });
+        } else if (entry.status === "Leave") {
+          employeeDailyRecords[dateKey].leaveCount++;
+          employeeDailyRecords[dateKey].hasLeave = true;
+          employeeDailyRecords[dateKey].punches.push({
+            type: 'LEAVE',
+            time: entry.dateTime,
+            status: entry.status
+          });
+        }
+      }
+    });
+
+    // Calculate totals and mispunch details
+    let totalPresent = 0;
+    let totalLeave = 0;
+    let totalIn = 0;
+    let totalOut = 0;
+    let totalMispunch = 0;
+    const mispunchDetails = [];
+
+    Object.values(employeeDailyRecords).forEach(dayRecord => {
+      totalIn += dayRecord.inCount;
+      totalOut += dayRecord.outCount;
+      totalLeave += dayRecord.leaveCount;
+      
+      // Determine if this is a leave day, present day, or absent day
+      if (dayRecord.hasLeave) {
+        // Don't count leave days as present or absent
+      } else if (dayRecord.inCount > 0 || dayRecord.outCount > 0) {
+        totalPresent++;
+      }
+      
+      // Check for mispunch using the new logic
+      const mispunchStatus = determineMispunchStatus(
+        dayRecord.inCount, 
+        dayRecord.outCount, 
+        dayRecord.date,
+        dayRecord.hasLeave
+      );
+      
+      if (mispunchStatus.isMispunch) {
+        totalMispunch++;
+        mispunchDetails.push({
+          employee: dayRecord.employee,
+          date: dayRecord.date,
+          inCount: dayRecord.inCount,
+          outCount: dayRecord.outCount,
+          type: mispunchStatus.type,
+          details: mispunchStatus.details,
+          isDayComplete: isDayComplete(dayRecord.date),
+          punches: dayRecord.punches
+        });
+      }
+    });
+
+    setSummaryData({
+      totalPresent,
+      totalLeave: Math.max(totalLeave, Object.values(employeeDailyRecords).filter(day => day.hasLeave).length),
+      totalIn,
+      totalOut,
+      totalMispunch,
+      mispunchDetails
+    });
+
+  }, [attendanceData, salesPersonName, userRole]);
+
+  if (isLoading) {
+    return (
+      <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden mb-8">
+        <div className="bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 px-8 py-6">
+          <h2 className="text-2xl font-bold text-white">Attendance Summary</h2>
+          <p className="text-blue-50">Loading your attendance statistics...</p>
+        </div>
+        <div className="p-8 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto mb-4"></div>
+          <p className="text-slate-600">Loading attendance summary...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden mb-8">
+      <div className="bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 px-8 py-6">
+        <div className="flex items-center gap-3 mb-2">
+          <Calendar className="h-6 w-6 text-white" />
+          <h2 className="text-2xl font-bold text-white">
+            {userRole?.toLowerCase() === "admin" ? "Overall Attendance Summary" : "Your Attendance Summary"}
+          </h2>
+        </div>
+        <p className="text-blue-50">
+          {userRole?.toLowerCase() === "admin" 
+            ? "Complete attendance overview for current month" 
+            : `Monthly attendance overview for ${salesPersonName}`}
+        </p>
+      </div>
+      
+      <div className="p-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6">
+          {/* Total Present Days */}
+          <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-6 text-center hover:shadow-lg transition-shadow">
+            <div className="flex justify-center mb-3">
+              <CheckCircle className="h-8 w-8 text-green-600" />
+            </div>
+            <div className="text-3xl font-bold text-green-700 mb-1">
+              {summaryData.totalPresent}
+            </div>
+            <div className="text-sm font-medium text-green-600">
+              Present Days
+            </div>
+          </div>
+
+          {/* Total Leave Days */}
+          <div className="bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 rounded-xl p-6 text-center hover:shadow-lg transition-shadow">
+            <div className="flex justify-center mb-3">
+              <XCircle className="h-8 w-8 text-amber-600" />
+            </div>
+            <div className="text-3xl font-bold text-amber-700 mb-1">
+              {summaryData.totalLeave}
+            </div>
+            <div className="text-sm font-medium text-amber-600">
+              Leave Days
+            </div>
+          </div>
+
+          {/* Total IN */}
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-6 text-center hover:shadow-lg transition-shadow">
+            <div className="flex justify-center mb-3">
+              <Clock className="h-8 w-8 text-blue-600" />
+            </div>
+            <div className="text-3xl font-bold text-blue-700 mb-1">
+              {summaryData.totalIn}
+            </div>
+            <div className="text-sm font-medium text-blue-600">
+              Total IN
+            </div>
+          </div>
+
+          {/* Total OUT */}
+          <div className="bg-gradient-to-br from-purple-50 to-violet-50 border border-purple-200 rounded-xl p-6 text-center hover:shadow-lg transition-shadow">
+            <div className="flex justify-center mb-3">
+              <Clock className="h-8 w-8 text-purple-600" />
+            </div>
+            <div className="text-3xl font-bold text-purple-700 mb-1">
+              {summaryData.totalOut}
+            </div>
+            <div className="text-sm font-medium text-purple-600">
+              Total OUT
+            </div>
+          </div>
+
+          {/* Total Mispunch */}
+          <div className="bg-gradient-to-br from-red-50 to-rose-50 border border-red-200 rounded-xl p-6 text-center hover:shadow-lg transition-shadow">
+            <div className="flex justify-center mb-3">
+              <AlertTriangle className="h-8 w-8 text-red-600" />
+            </div>
+            <div className="text-3xl font-bold text-red-700 mb-1">
+              {summaryData.totalMispunch}
+            </div>
+            <div className="text-sm font-medium text-red-600">
+              Mispunch
+            </div>
+          </div>
+        </div>
+
+        {/* Mispunch Details Section */}
+        {summaryData.mispunchDetails.length > 0 && (
+          <div className="mt-8 bg-red-50/50 rounded-xl p-6 border border-red-200">
+            <div className="flex items-center gap-2 mb-4">
+              <AlertTriangle className="h-5 w-5 text-red-600" />
+              <h3 className="text-lg font-semibold text-red-800">Mispunch Details</h3>
+            </div>
+            <div className="space-y-3">
+              {summaryData.mispunchDetails.map((detail, index) => (
+                <div key={index} className="bg-white/60 rounded-lg p-4 border border-red-200">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div className="flex-1">
+                      <div className="font-medium text-red-800">
+                        {userRole?.toLowerCase() === "admin" ? `${detail.employee} - ` : ""}{detail.date}
+                      </div>
+                      <div className="text-sm text-red-600 mt-1">
+                        {detail.details}
+                      </div>
+                      <div className="text-xs text-red-500 mt-1">
+                        {detail.type === 'missing_out' && 'Day completed - Missing OUT punch(es)'}
+                        {detail.type === 'invalid' && 'Invalid punch sequence'}
+                        {detail.isDayComplete ? ' (Day Complete)' : ' (Day In Progress)'}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded font-medium">
+                        IN: {detail.inCount}
+                      </span>
+                      <span className="px-2 py-1 bg-purple-100 text-purple-800 text-xs rounded font-medium">
+                        OUT: {detail.outCount}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Additional Info */}
+        <div className="mt-6 bg-slate-50/50 rounded-lg p-4">
+          <div className="text-sm text-slate-600 text-center">
+            <span className="font-medium">Current Month:</span> {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            {userRole?.toLowerCase() !== "admin" && (
+              <>
+                <span className="mx-2">•</span>
+                <span className="font-medium">User:</span> {salesPersonName}
+              </>
+            )}
+            <span className="mx-2">•</span>
+            <span className="font-medium">Mispunch Cutoff:</span> 11:59 PM daily
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // AttendanceHistory Component with filters in header and Excel download functionality
 const AttendanceHistory = ({ attendanceData, isLoading, userRole }) => {
@@ -399,7 +762,7 @@ const AttendanceHistory = ({ attendanceData, isLoading, userRole }) => {
   );
 };
 
-// Main Attendance Component (unchanged from previous version)
+// Main Attendance Component (rest of the code remains the same)
 const Attendance = () => {
   const [attendance, setAttendance] = useState([]);
   const [historyAttendance, setHistoryAttendance] = useState([]);
@@ -982,6 +1345,14 @@ const Attendance = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-0 lg:p-8">
       <div className="max-w-7xl mx-auto space-y-8">
+        {/* Attendance Summary Card */}
+        <AttendanceSummaryCard 
+          attendanceData={historyAttendance}
+          isLoading={isLoadingHistory}
+          userRole={userRole}
+          salesPersonName={salesPersonName}
+        />
+
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 overflow-hidden">
           <div className="bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500 px-8 py-6">
             <h3 className="text-2xl font-bold text-white mb-2">
