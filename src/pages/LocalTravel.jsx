@@ -825,14 +825,14 @@ const handleOutSubmit = async (e) => {
     updateData[FMS_COLUMNS.OUT_TOTAL_AMOUNT] = outTotalAmount.toString();
 
     
-    const nextSerialNumber = `TI-${highestNumber.toString().padStart(3, "0")}`;
-    console.log("highestNumber:", nextSerialNumber);
+   const serialNumberToUpdate = submittedInData.serialNumber; // TI-025
+console.log("Updating serial number:", serialNumberToUpdate);
 
     // Send the correct payload format
     const payload = {
       sheetName: "FMS",
       action: "updateOutData",
-      serialNumber: nextSerialNumber,
+      serialNumber: serialNumberToUpdate,
       rowData: JSON.stringify(updateData)
     };
 
